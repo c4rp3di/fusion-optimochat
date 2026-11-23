@@ -108,7 +108,7 @@ class MainActivity : Activity() {
         anotar("P4 clasificacion de NAT...")
         val dht = Dht()
         try {
-            anotar(SondaNat.clasificar(dht) { anotar(it) })
+            anotar(SondaNat.clasificar(dht, log = { anotar(it) }))
         } catch (e: Exception) {
             anotar("P4 ERROR ${e.javaClass.simpleName}: ${e.message}")
         } finally {
