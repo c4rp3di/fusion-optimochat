@@ -9,14 +9,15 @@ import java.net.DatagramSocket
 var f7 = 0
 fun ok7(c: Boolean, m: String) { println((if (c) "OK    " else "FALLO ") + m); if (!c) f7++ }
 
-class Extremo7(val nodo: NodoFalso, val id: Identidad4, val huellaPar: ByteArray, secreto: ByteArray) {
+class Extremo7(val nodo: NodoFalso, val id: Identidad4, val huellaPar: ByteArray, secreto: ByteArray, servidor: Boolean? = null, plazoTls: Long = 20_000) {
     val lado = Lado(ritmoMs = 5)
     val dht = Dht(Demux(DatagramSocket()))
     val estados = java.util.Collections.synchronizedList(ArrayList<String>())
     val gestor = GestorConexion(
         dht, lado.chat, Confianza.contexto(id.claves, huellaPar), id.huella, huellaPar, secreto,
         listOf(nodo.dir), { estados.add(it) }, espera = { 300L },
-        encuentroMs = 20_000, rafagaMs = 2500, pausaMs = 300, sesionMinimaMs = 1000
+        encuentroMs = 20_000, rafagaMs = 2500, pausaMs = 300, sesionMinimaMs = 1000,
+        plazoTlsMs = plazoTls, servidorForzado = servidor
     )
     fun cerrar() { gestor.parar(); dht.puerto.cerrar() }
 }
@@ -54,18 +55,31 @@ fun mainGestor(): Int {
         nodo.cerrar()
     }
 
-    // 4. Clave distinta de la fijada: nunca se llega al chat
-    run {
-        val nodo = NodoFalso(); val sec = "s2".toByteArray()
-        val a = Extremo7(nodo, ia, ic.huella, sec)   // A espera a C...
-        val b = Extremo7(nodo, ib, ia.huella, sec)   // ...pero quien aparece es B
+    // 4. Clave distinta de la fijada: nunca se llega al chat, sea cual sea el rol TLS de quien rechaza
+    for ((nombre, aServ) in listOf("A cliente" to false, "A servidor" to true)) {
+        val nodo = NodoFalso(); val sec = "s2$nombre".toByteArray()
+        val a = Extremo7(nodo, ia, ic.huella, sec, servidor = aServ)   // A espera a C...
+        val b = Extremo7(nodo, ib, ia.huella, sec, servidor = !aServ)  // ...pero quien aparece es B
         val m = a.lado.chat.enviar("secreto")
         a.gestor.iniciar(); b.gestor.iniciar()
-        esperar(30_000) { a.estados.any { it.contains("TLS rechazado") } }; Thread.sleep(1500)
-        ok7(a.lado.almacen.estado(m.id) == Estado.PENDIENTE && b.lado.recibidos.isEmpty(), "impostor: el mensaje no sale con otra clave")
-        ok7(a.gestor.sesiones == 0, "impostor: ninguna sesion establecida")
-        ok7(a.estados.any { it.contains("TLS rechazado") }, "impostor: se anota TLS rechazado")
+        val visto = esperar(30_000) { a.estados.any { it.contains("TLS rechazado") } }; Thread.sleep(1500)
+        ok7(visto, "impostor ($nombre): se anota TLS rechazado")
+        ok7(a.lado.almacen.estado(m.id) == Estado.PENDIENTE && b.lado.recibidos.isEmpty(), "impostor ($nombre): el mensaje no sale con otra clave")
+        ok7(a.gestor.sesiones == 0, "impostor ($nombre): ninguna sesion establecida")
         a.cerrar(); b.cerrar(); nodo.cerrar()
+    }
+
+    // 5. Roles TLS incompatibles (los dos servidor): sin el plazo se colgarian para siempre
+    run {
+        val nodo = NodoFalso(); val sec = "s3".toByteArray()
+        val a = Extremo7(nodo, ia, ib.huella, sec, servidor = true, plazoTls = 3000)
+        val b = Extremo7(nodo, ib, ia.huella, sec, servidor = true, plazoTls = 3000)
+        a.gestor.iniciar(); b.gestor.iniciar()
+        ok7(esperar(30_000) { a.estados.any { it.contains("TLS sin respuesta") } }, "plazo TLS: un apreton que no avanza se corta y se anota")
+        ok7(esperar(30_000) { a.estados.count { it.contains("Buscando") } >= 2 }, "plazo TLS: despues vuelve a intentarlo")
+        val t0 = System.currentTimeMillis(); a.cerrar(); b.cerrar()
+        ok7(System.currentTimeMillis() - t0 < 10_000, "plazo TLS: parar() sigue siendo rapido")
+        nodo.cerrar()
     }
 
     println(if (f7 == 0) "Gestor: todo OK" else "Gestor: $f7 FALLOS")
