@@ -1,24 +1,22 @@
 package com.optimo.chat
 
 import java.math.BigInteger
-import java.net.DatagramPacket
 import java.net.DatagramSocket
 import java.net.InetAddress
 import java.net.InetSocketAddress
-import java.net.SocketTimeoutException
 import java.security.SecureRandom
 
 /**
  * Cliente minimo de la DHT de BitTorrent (BEP 5), solo IPv4 en la fase 0.
  * Se usa como "agenda de encuentro": anunciarse y buscar bajo un identificador que solo conocen los contactos.
  *
- * IMPORTANTE: el socket UDP es el MISMO que usara luego el transporte (hole punching). El mapeo del NAT que
- * la DHT registra con implied_port=1 es el de este socket; con otro socket el puerto externo seria distinto.
- * Los paquetes de la DHT empiezan por 'd' (bencode); los del transporte propio, por otro byte.
+ * IMPORTANTE: el [Puerto] comparte UN socket UDP con el transporte (hole punching). El mapeo del NAT que
+ * la DHT registra con implied_port=1 es el de ese socket; con otro socket el puerto externo seria distinto.
+ * Los paquetes de la DHT empiezan por 'd' (bencode); los del transporte propio, por otro byte (ver [Demux]).
  *
  * Esta clase es bloqueante: se usa desde un hilo de fondo. Sin dependencias.
  */
-class Dht(val socket: DatagramSocket = DatagramSocket()) {
+class Dht(val puerto: Puerto = Demux(DatagramSocket())) {
 
     class Nodo(val id: ByteArray, val dir: InetSocketAddress)
 
@@ -61,7 +59,7 @@ class Dht(val socket: DatagramSocket = DatagramSocket()) {
         }
     }
 
-    val puertoLocal: Int get() = socket.localPort
+    val puertoLocal: Int get() = puerto.puertoLocal
 
     /** Resuelve los nombres de arranque (solo IPv4). */
     fun resolverArranque(): List<InetSocketAddress> {
@@ -84,8 +82,7 @@ class Dht(val socket: DatagramSocket = DatagramSocket()) {
         val a = HashMap<String, Any?>(args)
         a["id"] = idNodo
         val msg = mapOf<String, Any?>("t" to t, "y" to "q", "q" to q, "a" to a)
-        val datos = Bencode.codificar(msg)
-        socket.send(DatagramPacket(datos, datos.size, destino))
+        puerto.enviar(destino, Bencode.codificar(msg))
         return t
     }
 
@@ -122,14 +119,11 @@ class Dht(val socket: DatagramSocket = DatagramSocket()) {
     fun consulta(destino: InetSocketAddress, q: String, args: Map<String, Any?>, esperaMs: Int = 1200): Respuesta? {
         val t = enviar(destino, q, args)
         val fin = System.currentTimeMillis() + esperaMs
-        val buf = ByteArray(2048)
         while (true) {
             val resto = (fin - System.currentTimeMillis()).toInt()
             if (resto <= 0) return null
-            socket.soTimeout = resto
-            val p = DatagramPacket(buf, buf.size)
-            try { socket.receive(p) } catch (_: SocketTimeoutException) { return null }
-            val r = interpretar(p.data.copyOf(p.length)) ?: continue
+            val recibido = puerto.recibir(resto) ?: return null
+            val r = interpretar(recibido.datos) ?: continue
             if (r.t.contentEquals(t)) return r
         }
     }
