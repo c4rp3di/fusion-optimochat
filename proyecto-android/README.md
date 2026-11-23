@@ -5,11 +5,11 @@ pantalla de pruebas de viabilidad de la fase 0 de la especificación técnica. S
 sistema), misma versión de Gradle/AGP/Kotlin que Optimo y misma mecánica de firma con Fusion.
 
 > **Estado:**
-> - **Compilado y probado en la JVM** (`pruebas/jvm/probar.sh`): `Bencode`, `Dht` (sin red y contra un nodo DHT falso en loopback), `Puerto`/`Demux` (sockets UDP reales), `GestorConexion`, `QrCodigo`,
+> - **Compilado y probado en la JVM** (`pruebas/jvm/probar.sh`): `Bencode`, `Dht` (sin red y contra un nodo DHT falso en loopback), `Puerto`/`Demux` (sockets UDP reales), `GestorConexion`, `QrCodigo`, `AlmacenCifrado`,
 >   `Informe`, `SondaNat` (identificador de encuentro), `Invitacion`, `UdpFiable`, `Confianza`, `TlsCanal`, `Protocolo`, `AlmacenMensajes` y `Chat`. Incluye vectores del RFC 4648
 >   (base32) y del RFC 5869 (HKDF). `UdpFiable` se prueba en una red simulada con pérdida, duplicados y reordenación
 >   (hasta 45 % de pérdida): no sustituye a la prueba en red real.
-> - **Sin compilar ni probar:** `Identidad`, `EstadoRed`, `TlsFijado` y `MainActivity`, porque usan APIs de Android
+> - **Sin compilar ni probar:** `Identidad`, `EstadoRed`, `TlsFijado`, `FilasSqlite`, `ClaveAlmacen` y `MainActivity`, porque usan APIs de Android
 >   y en el entorno de redacción no hay SDK. Hay que compilar en Fusion y corregir lo que salga.
 > - **Sin probar en red real:** la parte de red de `Dht` y el punching. Es justo lo que mide la fase 0.
 
@@ -82,6 +82,13 @@ Si no, los nodos de ayuda pasan a ser requisito de la versión 1.
 - `QrCodigo.kt` — generador de QR (modo byte UTF-8, corrección M, versiones 1–20, hasta 666 bytes), solo para mostrar la
   invitación; la lectura la hace la cámara del sistema. Verificado decodificando 27 imágenes (de 1 a 666 bytes, UTF-8 y una
   invitación real) con OpenCV mediante `pruebas/jvm/qr_verificar.py` (necesita `python3` con `cv2`; si no está, la prueba avisa y se salta).
+- `AlmacenCifrado.kt` — almacén de mensajes persistente: `AlmacenCifrado` (lógica de estados y secuencias) sobre un `AlmacenFilas`
+  y un `Sellador` (AES-256-GCM, IV aleatorio, el contexto `id|dirección|seq` va como dato autenticado: un bloque movido a otra fila
+  o alterado se rechaza). En claro solo quedan id aleatorio, dirección, seq y estado; hora, cuerpo y respuesta van cifrados.
+  Probado en la JVM con filas en memoria: mismo contrato que `AlmacenMemoria`, alteración, cambio de bloques, otra clave,
+  persistencia al reabrir, concurrencia y un chat completo (40 mensajes por lado) sobre él.
+- `FilasSqlite.kt` y `ClaveAlmacen.kt` — (Android, sin compilar) SQLite por contacto y clave AES en Keystore. Las sentencias SQL se
+  comprobaron con el SQLite de Python, pero la clase hay que compilarla y probarla en Fusion.
 - `MainActivity.kt` — pantalla de pruebas.
 
 `pruebas/jvm/` — pruebas de la lógica pura; se ejecutan con `pruebas/jvm/probar.sh` (usa el compilador de Kotlin de Gradle, sin Android ni red).
