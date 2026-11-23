@@ -25,7 +25,11 @@ class GestorConexion(
     private val rafagaMs: Long = 15_000,
     private val pausaMs: Long = 6_000,
     private val sesionMinimaMs: Long = 30_000,
-    private val protocolos: Array<String>? = null
+    private val protocolos: Array<String>? = null,
+    /** Maximo para completar el apreton TLS: un par que mantiene el transporte vivo pero no negocia no puede colgarnos. */
+    private val plazoTlsMs: Long = 20_000,
+    /** Solo para pruebas: fuerza el rol TLS en vez de compararlo por huella. */
+    private val servidorForzado: Boolean? = null
 ) {
     @Volatile private var parado = false
     @Volatile private var hilo: Thread? = null
@@ -87,9 +91,24 @@ class GestorConexion(
         try {
             if (!udp.conectar(10_000)) return "el transporte no conecto"
             alEstado("Transporte listo; negociando TLS")
-            val tls = TlsCanal(udp, contexto, servidor = menor(miHuella, huellaPar), protocolos = protocolos)
+            val tls = TlsCanal(udp, contexto, servidor = servidorForzado ?: menor(miHuella, huellaPar), protocolos = protocolos)
             actual = tls
-            try { tls.apretonDeManos() } catch (e: Exception) { return "TLS rechazado (${e.javaClass.simpleName})" }
+            val terminado = java.util.concurrent.atomic.AtomicBoolean(false)
+            val vencido = java.util.concurrent.atomic.AtomicBoolean(false)
+            val vigilante = Thread({
+                try {
+                    Thread.sleep(plazoTlsMs)
+                    if (!terminado.get()) { vencido.set(true); tls.cerrar() }
+                } catch (_: InterruptedException) {}
+            }, "gestor-vigilante-tls").apply { isDaemon = true; start() }
+            try {
+                tls.apretonDeManos()
+            } catch (e: Exception) {
+                return if (vencido.get()) "TLS sin respuesta" else "TLS rechazado (${e.javaClass.simpleName})"
+            } finally {
+                terminado.set(true)
+                vigilante.interrupt()
+            }
             sesiones++
             alEstado("Conectado")
             return chat.atender(tls)
