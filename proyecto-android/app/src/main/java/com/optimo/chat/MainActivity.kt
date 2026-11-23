@@ -112,7 +112,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             anotar("P4 ERROR ${e.javaClass.simpleName}: ${e.message}")
         } finally {
-            dht.socket.close()
+            dht.puerto.cerrar()
         }
     }
 
@@ -127,7 +127,7 @@ class MainActivity : Activity() {
         } catch (e: Exception) {
             anotar("P5 ERROR ${e.javaClass.simpleName}: ${e.message}")
         } finally {
-            dht.socket.close()
+            dht.puerto.cerrar()
         }
     }
 
