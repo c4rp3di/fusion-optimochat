@@ -4,9 +4,14 @@ App Android independiente (`com.optimo.chat`), compañera de Optimo. Esta versi�
 pantalla de pruebas de viabilidad de la fase 0 de la especificación técnica. Sin dependencias (solo APIs del
 sistema), misma versión de Gradle/AGP/Kotlin que Optimo y misma mecánica de firma con Fusion.
 
-> **Estado:** el código no se ha compilado ni probado en dispositivo (en el entorno de redacción no hay SDK de
-> Android ni compilador de Kotlin). Hay que compilar en Fusion y corregir lo que salga, como con otras versiones
-> de Optimo.
+> **Estado:**
+> - **Compilado y probado en la JVM** (`pruebas/jvm/probar.sh`): `Bencode`, `Dht` (sin red y contra un nodo DHT falso en loopback), `Puerto`/`Demux` (sockets UDP reales), `GestorConexion`, `QrCodigo`,
+>   `Informe`, `SondaNat` (identificador de encuentro), `Invitacion`, `UdpFiable`, `Confianza`, `TlsCanal`, `Protocolo`, `AlmacenMensajes` y `Chat`. Incluye vectores del RFC 4648
+>   (base32) y del RFC 5869 (HKDF). `UdpFiable` se prueba en una red simulada con pérdida, duplicados y reordenación
+>   (hasta 45 % de pérdida): no sustituye a la prueba en red real.
+> - **Sin compilar ni probar:** `Identidad`, `EstadoRed`, `TlsFijado` y `MainActivity`, porque usan APIs de Android
+>   y en el entorno de redacción no hay SDK. Hay que compilar en Fusion y corregir lo que salga.
+> - **Sin probar en red real:** la parte de red de `Dht` y el punching. Es justo lo que mide la fase 0.
 
 ## Pruebas (botones de la pantalla)
 
@@ -51,7 +56,35 @@ Si no, los nodos de ayuda pasan a ser requisito de la versión 1.
 - `SondaNat.kt` — clasificación de NAT y prueba de encuentro con punching.
 - `TlsFijado.kt` — TLS mutuo con confianza fijada por huella.
 - `Informe.kt` — enmascarado de IPs.
+- `Invitacion.kt` — (fase 1, lógica pura) enlace `optimo://invitar`, prueba de emparejamiento, código de 6 dígitos y HKDF.
+  Aún no está conectada a la interfaz.
+- `UdpFiable.kt` — (fase 2, lógica pura) flujo fiable y ordenado sobre UDP: ventana deslizante, SACK, RTO, congestión,
+  latidos y cierre ordenado. Incluye las interfaces `Canal` y `Datagramas` (`DatagramasUdp` solo vale con socket exclusivo).
+- `Puerto.kt` — `Puerto` y `Demux`: UN socket UDP compartido. Un hilo reparte los paquetes del transporte (primer byte 0xA?) a la
+  cola de su remoto (`canal(remoto)`) y el resto (DHT, sondas de punching) a `recibir()`. Limita los remotos sin registrar (32).
+  Probado en loopback: 500 KB por sentido, tráfico mezclado, paquetes tempranos, spam, nodo DHT falso, encuentro + punching +
+  transporte sobre el mismo socket, y clasificación de NAT estable/simétrica.
+- `Confianza.kt` — huella y `TrustManager` fijado por huella (lógica pura).
+- `TlsCanal.kt` — TLS mutuo con `SSLEngine` sobre cualquier `Canal` (UDP fiable o TCP). Probado en la JVM con TLS 1.3 y 1.2
+  sobre una red con pérdidas: huella fijada, rechazo de intrusos, cliente sin certificado, paquetes alterados y
+  `close_notify`. Verifica además que el contenido no aparece en claro en los paquetes.
+- `Protocolo.kt` — tramas y mensajes (HELLO, MSG, ACK, READ, PING, BYE) con validación estricta de longitudes y UTF-8.
+- `AlmacenMensajes.kt` — interfaz de persistencia de una conversación, estados (pendiente, enviado, entregado, leído) y una
+  implementación en memoria para pruebas. La de SQLite cifrado llegará con la interfaz.
+- `Chat.kt` — conversación con un contacto: cola de salida, un único hilo de envío con ritmo controlado, duplicados,
+  confirmaciones de lectura, límites de tasa (60 mensajes y 200 tramas por segundo) y política de reintentos (5 s a 15 min).
+  Probado con 11 escenarios: pérdidas, caída y reanudación, inyección de duplicados, entradas inválidas, envíos
+  concurrentes, cola acumulada de 200 mensajes y conversación completa sobre TLS y UDP.
+- `GestorConexion.kt` — mantiene la conexión con un contacto: encuentro por DHT, punching, `UdpFiable`, TLS con huella fijada
+  (servidor = huella menor) y `Chat.atender`; al caer espera con `Reintentos` y repite; `cortar()` para cambios de red y `parar()`.
+  Probado en loopback con un nodo DHT falso: entrega de mensajes en cola, reconexión tras un corte sin duplicados, parada rápida
+  y rechazo de una clave distinta de la fijada (nunca llega al chat).
+- `QrCodigo.kt` — generador de QR (modo byte UTF-8, corrección M, versiones 1–20, hasta 666 bytes), solo para mostrar la
+  invitación; la lectura la hace la cámara del sistema. Verificado decodificando 27 imágenes (de 1 a 666 bytes, UTF-8 y una
+  invitación real) con OpenCV mediante `pruebas/jvm/qr_verificar.py` (necesita `python3` con `cv2`; si no está, la prueba avisa y se salta).
 - `MainActivity.kt` — pantalla de pruebas.
+
+`pruebas/jvm/` — pruebas de la lógica pura; se ejecutan con `pruebas/jvm/probar.sh` (usa el compilador de Kotlin de Gradle, sin Android ni red).
 
 ## Limitaciones conocidas de esta versión
 
