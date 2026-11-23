@@ -10,7 +10,7 @@ import android.database.sqlite.SQLiteOpenHelper
  * Fusion. La logica de chat y el cifrado estan en [AlmacenCifrado], que si se prueba en la JVM.
  */
 class FilasSqlite(contexto: Context, nombre: String) :
-    SQLiteOpenHelper(contexto, nombre, null, 1) {
+    SQLiteOpenHelper(contexto, nombre, null, 1), AlmacenFilas {
 
     override fun onCreate(db: SQLiteDatabase) {
         db.execSQL(
@@ -48,10 +48,17 @@ class FilasSqlite(contexto: Context, nombre: String) :
 
     @Synchronized override fun cambiarEstado(id: String, desde: List<Int>, a: Int): Boolean {
         val marcas = desde.joinToString(",") { "?" }
-        val args = arrayOf<Any>(a, id) + desde.map { it as Any }
-        val st = writableDatabase.compileStatement("UPDATE mensajes SET estado = ? WHERE id = ? AND propio = 1 AND estado IN ($marcas)")
-        args.forEachIndexed { i, v -> if (v is Int) st.bindLong(i + 1, v.toLong()) else st.bindString(i + 1, v as String) }
-        return st.use { it.executeUpdateDelete() } > 0
+        val st = writableDatabase.compileStatement(
+            "UPDATE mensajes SET estado = ? WHERE id = ? AND propio = 1 AND estado IN ($marcas)"
+        )
+        try {
+            st.bindLong(1, a.toLong())
+            st.bindString(2, id)
+            desde.forEachIndexed { i, v -> st.bindLong(3 + i, v.toLong()) }
+            return st.executeUpdateDelete() > 0
+        } finally {
+            st.close()
+        }
     }
 
     @Synchronized override fun cambiarEstadoHasta(seq: Long, desde: List<Int>, a: Int): List<String> {
@@ -94,6 +101,6 @@ class FilasSqlite(contexto: Context, nombre: String) :
             .use { if (it.moveToFirst()) it.getLong(0) else null }
 
     @Synchronized override fun ponerMeta(clave: String, valor: Long) {
-        writableDatabase.execSQL("INSERT OR REPLACE INTO meta (clave, valor) VALUES (?, ?)", arrayOf(clave, valor))
+        writableDatabase.execSQL("INSERT OR REPLACE INTO meta (clave, valor) VALUES (?, ?)", arrayOf<Any?>(clave, valor))
     }
 }
