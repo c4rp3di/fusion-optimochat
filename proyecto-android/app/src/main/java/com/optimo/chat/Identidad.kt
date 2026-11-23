@@ -6,7 +6,6 @@ import android.security.keystore.KeyProperties
 import java.math.BigInteger
 import java.security.KeyPairGenerator
 import java.security.KeyStore
-import java.security.MessageDigest
 import java.security.PrivateKey
 import java.security.cert.X509Certificate
 import java.security.spec.ECGenParameterSpec
@@ -76,8 +75,7 @@ object Identidad {
     }
 
     /** SHA-256 de la clave publica del certificado dado. */
-    fun huellaDe(cert: X509Certificate): ByteArray =
-        MessageDigest.getInstance("SHA-256").digest(cert.publicKey.encoded)
+    fun huellaDe(cert: X509Certificate): ByteArray = Confianza.huellaDe(cert)
 
     fun huella(): ByteArray = huellaDe(certificado())
 
