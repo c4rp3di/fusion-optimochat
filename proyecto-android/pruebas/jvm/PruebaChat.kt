@@ -45,7 +45,7 @@ class CanalMem(private val ent: LinkedBlockingQueue<ByteArray>, private val sal:
         sal.put(b.copyOfRange(desde, desde + largo))
     }
 
-    override fun cerrar() { cerrado = true; sal.put(ByteArray(0)) }
+    override fun cerrar() { cerrado = true; sal.put(ByteArray(0)); ent.offer(ByteArray(0)) }
 }
 
 fun parMem(): Pair<CanalMem, CanalMem> {
