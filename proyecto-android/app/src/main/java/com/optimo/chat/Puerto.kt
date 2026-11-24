@@ -22,6 +22,15 @@ interface Puerto {
     /** Siguiente datagrama que NO es del transporte fiable. Null si no llega ninguno en [esperaMs]. */
     fun recibir(esperaMs: Int): Recibido?
 
+    /** Siguiente sonda de punching (primer byte 'O'). Va aparte de [recibir] para que la busqueda en la DHT no se las coma. */
+    fun recibirSonda(esperaMs: Int): Recibido?
+
+    /** Origenes de paquetes del transporte que llegaron sin canal registrado: prueba de que el otro ya nos alcanza. */
+    fun transporteEntrante(): List<SocketAddress>
+
+    /** Descarta lo acumulado de origenes sin canal (de intentos anteriores). */
+    fun olvidarNoRegistrados()
+
     /** Datagramas del transporte fiable hacia/desde [remoto]. Varias llamadas con el mismo remoto comparten cola. */
     fun canal(remoto: SocketAddress): Datagramas
 
@@ -48,6 +57,7 @@ class Demux(private val socket: DatagramSocket) : Puerto {
     private val colas = ConcurrentHashMap<SocketAddress, LinkedBlockingQueue<ByteArray>>()
     private val registrados = ConcurrentHashMap.newKeySet<SocketAddress>()
     private val otros = LinkedBlockingQueue<Recibido>(1024)
+    private val sondas = LinkedBlockingQueue<Recibido>(256)
     @Volatile private var cerrado = false
 
     /** Cuantos remotos tienen cola ahora mismo (registrados o no). Para pruebas. */
@@ -79,6 +89,9 @@ class Demux(private val socket: DatagramSocket) : Puerto {
                     q = colas.computeIfAbsent(de) { LinkedBlockingQueue(512) }
                 }
                 q.offer(datos)
+            } else if (datos[0] == 'O'.code.toByte()) {
+                val r = Recibido(datos, de)
+                if (!sondas.offer(r)) { sondas.poll(); sondas.offer(r) }
             } else {
                 val r = Recibido(datos, de)
                 if (!otros.offer(r)) { otros.poll(); otros.offer(r) }
@@ -108,6 +121,16 @@ class Demux(private val socket: DatagramSocket) : Puerto {
         get() = "UDP: $enviosOk envios correctos, $enviosFallidos fallidos" + (ultimoFallo?.let { " (ultimo fallo: $it)" } ?: "")
 
     override fun recibir(esperaMs: Int): Recibido? = otros.poll(esperaMs.toLong(), TimeUnit.MILLISECONDS)
+
+    override fun recibirSonda(esperaMs: Int): Recibido? = sondas.poll(esperaMs.toLong(), TimeUnit.MILLISECONDS)
+
+    override fun transporteEntrante(): List<SocketAddress> =
+        colas.entries.filter { !registrados.contains(it.key) && it.value.isNotEmpty() }.map { it.key }
+
+    override fun olvidarNoRegistrados() {
+        for (k in colas.keys.toList()) if (!registrados.contains(k)) colas.remove(k)
+        sondas.clear()
+    }
 
     override fun canal(remoto: SocketAddress): Datagramas {
         registrados.add(remoto)
