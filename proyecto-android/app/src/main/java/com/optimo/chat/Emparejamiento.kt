@@ -183,7 +183,7 @@ object Emparejamiento {
                 alEstado("Esperando al invitado")
                 val r = SondaNat.encuentro(dht, sec, restante, {}, semillas, tiempos.rafagaMs, tiempos.pausaMs) { cancelado }
                 if (cancelado) break
-                if (!r.exito || r.remoto == null) return Resultado.Fallo("Nadie ha usado la invitacion a tiempo")
+                if (!r.exito || r.remoto == null) return Resultado.Fallo("Nadie ha usado la invitacion a tiempo. ${r.texto}")
                 alEstado("Alguien se ha conectado; comprobando")
                 val tls = try { abrir(dht, r.remoto, contexto, true, tiempos.plazoTlsMs) } catch (e: Exception) {
                     if (cancelado) break
@@ -235,7 +235,7 @@ object Emparejamiento {
             val r = SondaNat.encuentro(dht, secretoEncuentro(invitacion.secreto), restante, {}, semillas,
                 tiempos.rafagaMs, tiempos.pausaMs) { cancelado }
             if (cancelado) return Resultado.Fallo("Cancelado")
-            if (!r.exito || r.remoto == null) return Resultado.Fallo("No se ha encontrado al anfitrion")
+            if (!r.exito || r.remoto == null) return Resultado.Fallo("No se ha encontrado al anfitrion. ${r.texto}")
             alEstado("Anfitrion encontrado; comprobando su identidad")
             val tls = try { abrir(dht, r.remoto, contexto, false, tiempos.plazoTlsMs) } catch (e: Exception) {
                 return Resultado.Fallo(
