@@ -71,7 +71,10 @@ class ContactosActivity : Activity() {
             .setTitle(c.nombre)
             .setMessage("Emparejado el $fecha.\n\nHuella de su clave (puedes compararla con la que ve en su móvil):\n\n${Identidad.huellaTexto(c.huella)}\n\n" +
                 "La conversación llegará en la siguiente fase.")
-            .setPositiveButton("Cerrar", null)
+            .setPositiveButton("Probar conexión") { _, _ ->
+                startActivity(Intent(this, ProbarContactoActivity::class.java).putExtra(ProbarContactoActivity.EXTRA_ID, c.id))
+            }
+            .setNeutralButton("Cerrar", null)
             .setNegativeButton("Borrar contacto") { _, _ ->
                 AlertDialog.Builder(this).setTitle("¿Borrar a ${c.nombre}?")
                     .setMessage("Se quitará de la lista. Para volver a hablar tendréis que emparejaros otra vez.")
