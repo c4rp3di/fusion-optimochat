@@ -52,6 +52,13 @@ class Dht(val puerto: Puerto = Demux(DatagramSocket())) {
         fun distancia(a: ByteArray, b: ByteArray): BigInteger =
             BigInteger(1, ByteArray(20) { i -> (a[i].toInt() xor b[i].toInt()).toByte() })
 
+        /** Descarta direcciones que un nodo DHT puede devolver pero a las que no tiene sentido (ni es seguro) enviar. */
+        fun direccionValida(a: InetSocketAddress): Boolean {
+            val ip = a.address ?: return false
+            return a.port in 1..65535 && !ip.isAnyLocalAddress && !ip.isMulticastAddress &&
+                !(ip.address.size == 4 && ip.address.all { it == 0xFF.toByte() })
+        }
+
         fun direccion(b: ByteArray, desde: Int = 0): InetSocketAddress {
             val ip = InetAddress.getByAddress(b.copyOfRange(desde, desde + 4))
             val puerto = ((b[desde + 4].toInt() and 0xFF) shl 8) or (b[desde + 5].toInt() and 0xFF)
@@ -157,8 +164,8 @@ class Dht(val puerto: Puerto = Demux(DatagramSocket())) {
                 val r = consulta(n.dir, "get_peers", mapOf("info_hash" to ih)) ?: continue
                 if (r.ip != null) ipExterna = r.ip
                 r.token?.let { tokens[clave] = it }
-                valores.addAll(r.valores)
-                r.nodos.forEach { x -> conocidos.putIfAbsent(x.dir.toString(), x) }
+                valores.addAll(r.valores.filter { direccionValida(it) })
+                r.nodos.forEach { x -> if (direccionValida(x.dir)) conocidos.putIfAbsent(x.dir.toString(), x) }
             }
         }
 
