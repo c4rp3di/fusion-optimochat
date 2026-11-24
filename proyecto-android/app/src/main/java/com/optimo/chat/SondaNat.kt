@@ -71,64 +71,85 @@ object SondaNat {
     class Resultado(val exito: Boolean, val remoto: InetSocketAddress?, val ms: Long, val texto: String)
 
     /**
-     * P5. Con un secreto compartido: se anuncia y se busca en la DHT bajo el identificador derivado, y cuando aparece
-     * el otro se lanzan rafagas UDP simultaneas desde el mismo [Puerto]. Exito = llega una sonda o un acuse del otro.
+     * P5. Con un secreto compartido: se anuncia y se busca en la DHT bajo el identificador derivado, y a la vez se
+     * busca al otro movil en la red local ([DescubrimientoLocal]). Cuando aparece se lanzan rafagas UDP simultaneas
+     * desde el mismo [Puerto]. Exito = llega una sonda o un acuse del otro movil.
+     * [local]: false desactiva la busqueda en la red local; [localExplicito] la sustituye (para pruebas).
      */
     fun encuentro(
         dht: Dht, secreto: ByteArray, maxMs: Long, log: (String) -> Unit,
         semillasDadas: List<InetSocketAddress>? = null,
         rafagaMs: Long = 15_000, pausaMs: Long = 6_000,
+        local: Boolean = true,
+        localExplicito: DescubrimientoLocal? = null,
         cancelar: () -> Boolean = { false }
     ): Resultado {
         val inicio = System.currentTimeMillis()
         val semillas = semillasDadas ?: dht.resolverArranque()
-        if (semillas.isEmpty()) return Resultado(false, null, 0, "Punching: sin nodos de arranque")
         val ih = identificador(secreto)
+        val vecinos = localExplicito ?: if (local) DescubrimientoLocal.estandar(dht.puertoLocal, ih).iniciar() else null
         val azar = SecureRandom()
+        val nonce = ByteArray(4).also { azar.nextBytes(it) }
         var propia: InetSocketAddress? = null
         var ronda = 0
 
         fun exito(de: InetSocketAddress?, t0: Long, texto: String) =
             Resultado(true, de, System.currentTimeMillis() - t0, texto)
 
-        while (System.currentTimeMillis() - inicio < maxMs && !cancelar()) {
-            ronda++
-            val loc = dht.localizar(ih, semillas, anunciar = (ronda % 3 == 1))
-            if (loc.ipExterna != null) propia = loc.ipExterna
-            val candidatos = loc.valores.filter { it != propia }
-            log("Ronda $ronda: ${loc.consultados} nodos, anunciado en ${loc.anunciados}, " +
-                "yo=${Informe.enmascarar(propia)}, candidatos=${candidatos.size}")
+        fun fallo(texto: String) = Resultado(false, null, System.currentTimeMillis() - inicio,
+            texto + " [" + dht.puerto.diagnostico + (vecinos?.let { "; red local: ${it.recibidas} balizas recibidas, ${it.enviadas} enviadas" +
+                (it.errorEscucha?.let { e -> ", sin escuchar: $e" } ?: "") } ?: "") + "]")
 
-            if (candidatos.isNotEmpty()) {
-                val t0 = System.currentTimeMillis()
-                val nonce = ByteArray(4).also { azar.nextBytes(it) }
-                while (System.currentTimeMillis() - t0 < rafagaMs && !cancelar()) {
-                    for (c in candidatos) dht.puerto.enviar(c, paquete(SONDA, nonce))
-                    val p = dht.puerto.recibir(200) ?: continue
-                    if (!esNuestro(p.datos, p.datos.size)) continue
-                    val de = p.de as? InetSocketAddress
-                    repeat(3) { dht.puerto.enviar(p.de, paquete(ACUSE, nonce)) }
-                    val ms = System.currentTimeMillis() - t0
-                    return exito(de, t0, "Punching: EXITO en $ms ms con ${Informe.enmascarar(de)}" +
-                        " (total ${(System.currentTimeMillis() - inicio) / 1000} s)")
-                }
-                log("Sin respuesta tras ${rafagaMs / 1000} s de rafagas; se vuelve a buscar")
+        try {
+            if (semillas.isEmpty() && vecinos == null) return fallo("Punching: sin nodos de arranque")
+            if (vecinos != null) {
+                // Si el otro esta en la misma red aparece en un par de segundos: no hace falta esperar a la DHT.
+                val fin = System.currentTimeMillis() + 2500
+                while (System.currentTimeMillis() < fin && vecinos.candidatos().isEmpty() && !cancelar()) Thread.sleep(100)
             }
-            // Pausa antes de otra ronda, atendiendo las sondas del otro mientras tanto.
-            val finPausa = System.currentTimeMillis() + pausaMs
-            while (System.currentTimeMillis() < finPausa && !cancelar()) {
-                val p = dht.puerto.recibir(500) ?: continue
-                if (esNuestro(p.datos, p.datos.size)) {
-                    val de = p.de as? InetSocketAddress
-                    val a = paquete(ACUSE, p.datos.copyOfRange(5, minOf(p.datos.size, 9)))
-                    repeat(3) { dht.puerto.enviar(p.de, a) }
-                    return exito(de, inicio, "Punching: EXITO (sonda recibida durante la espera) de " +
-                        Informe.enmascarar(de))
+
+            while (System.currentTimeMillis() - inicio < maxMs && !cancelar()) {
+                ronda++
+                val loc = if (semillas.isEmpty()) Dht.Localizacion(emptyList(), null, 0, 0)
+                else dht.localizar(ih, semillas, anunciar = (ronda % 3 == 1))
+                if (loc.ipExterna != null) propia = loc.ipExterna
+                val desdeDht = loc.valores.filter { it != propia }
+                fun candidatos(): List<InetSocketAddress> = (desdeDht + (vecinos?.candidatos() ?: emptyList())).distinct()
+                log("Ronda $ronda: ${loc.consultados} nodos, anunciado en ${loc.anunciados}, " +
+                    "yo=${Informe.enmascarar(propia)}, candidatos=${candidatos().size} (red local: ${vecinos?.candidatos()?.size ?: 0})")
+
+                if (candidatos().isNotEmpty()) {
+                    val t0 = System.currentTimeMillis()
+                    while (System.currentTimeMillis() - t0 < rafagaMs && !cancelar()) {
+                        for (c in candidatos()) dht.puerto.enviar(c, paquete(SONDA, nonce))
+                        val p = dht.puerto.recibir(200) ?: continue
+                        if (!esNuestro(p.datos, p.datos.size)) continue
+                        val de = p.de as? InetSocketAddress
+                        repeat(3) { dht.puerto.enviar(p.de, paquete(ACUSE, nonce)) }
+                        val ms = System.currentTimeMillis() - t0
+                        return exito(de, t0, "Punching: EXITO en $ms ms con ${Informe.enmascarar(de)}" +
+                            " (total ${(System.currentTimeMillis() - inicio) / 1000} s)")
+                    }
+                    log("Sin respuesta tras ${rafagaMs / 1000} s de rafagas; se vuelve a buscar")
+                }
+                // Pausa antes de otra ronda, atendiendo las sondas del otro (y sondeando a los vecinos de la red local).
+                val finPausa = System.currentTimeMillis() + pausaMs
+                while (System.currentTimeMillis() < finPausa && !cancelar()) {
+                    vecinos?.candidatos()?.forEach { dht.puerto.enviar(it, paquete(SONDA, nonce)) }
+                    val p = dht.puerto.recibir(300) ?: continue
+                    if (esNuestro(p.datos, p.datos.size)) {
+                        val de = p.de as? InetSocketAddress
+                        val a = paquete(ACUSE, p.datos.copyOfRange(5, minOf(p.datos.size, 9)))
+                        repeat(3) { dht.puerto.enviar(p.de, a) }
+                        return exito(de, inicio, "Punching: EXITO (sonda recibida durante la espera) de " +
+                            Informe.enmascarar(de))
+                    }
                 }
             }
+            return fallo("Punching: SIN EXITO en ${maxMs / 1000} s (propia=${Informe.enmascarar(propia)})")
+        } finally {
+            if (localExplicito == null) vecinos?.close()
         }
-        return Resultado(false, null, System.currentTimeMillis() - inicio,
-            "Punching: SIN EXITO en ${maxMs / 1000} s (propia=${Informe.enmascarar(propia)})")
     }
 
     fun encuentroYPunching(dht: Dht, secreto: ByteArray, maxMs: Long, log: (String) -> Unit): String =
