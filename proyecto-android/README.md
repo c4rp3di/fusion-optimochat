@@ -26,7 +26,14 @@ sistema), misma versión de Gradle/AGP/Kotlin que Optimo y misma mecánica de fi
 
 P6 (mantenimiento y batería) y P7 (cambio de red con conexión abierta) se hacen a mano con estas pantallas: ver abajo.
 
-## Cómo probar
+## Cómo probar (sin escribir datos a mano)
+
+1. Emparejar los dos móviles (**Invitar a alguien** en uno, escanear el QR o pegar el enlace en el otro). Eso ya es un primer P1+P5.
+2. En cada móvil: tocar el contacto → **Probar conexión** → **Probar ahora**, en los dos con menos de un par de minutos de diferencia.
+3. Repetir cambiando de red (Wi-Fi/datos, redes distintas): mínimo 10 intentos por pareja. La pantalla cuenta intentos y aciertos.
+4. **Copiar informe** en cada móvil y juntar las líneas. Si la red cambia durante un intento queda anotado y no cuenta para esa pareja.
+
+## Cómo probar a mano (pantalla de pruebas de la fase 0)
 
 1. Instalar en dos móviles. En cada uno: **Identidad** y **Red**.
 2. **P1 (TLS), en la misma Wi-Fi:** en el móvil A pulsar *TLS servidor* (sin huella: acepta a cualquiera y anota la del cliente).
@@ -98,6 +105,9 @@ Si no, los nodos de ayuda pasan a ser requisito de la versión 1.
   malformadas, plazos, y de extremo a extremo sobre DHT falsa + UDP fiable + TLS reales.
 - Interfaz de emparejamiento (Android, **sin compilar**): `ContactosActivity` (pantalla principal), `InvitarActivity` (QR + enlace +
   cuenta atrás), `AceptarActivity` (abre `optimo://invitar` desde la cámara del sistema o pegado), `QrVista`, `Ui`, `Servicios`.
+- `PruebaContacto.kt` — prueba de conexión con un contacto ya emparejado, sin escribir nada: encuentro con su secreto, punching, UDP
+  fiable, TLS con su huella fijada y un eco que mide la latencia. Produce una línea de informe con IP enmascarada, tipo de red e id
+  corto (sin nombre). Probada en la JVM con DHT falsa; `ProbarContactoActivity` (Android, sin compilar) la lanza desde el contacto.
 - `MainActivity.kt` — pantalla de pruebas (ahora se abre desde «Pruebas de red»).
 
 `pruebas/jvm/` — pruebas de la lógica pura; se ejecutan con `pruebas/jvm/probar.sh` (usa el compilador de Kotlin de Gradle, sin Android ni red).
