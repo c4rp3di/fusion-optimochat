@@ -142,7 +142,10 @@ class Dht(val puerto: Puerto = Demux(DatagramSocket())) {
      * Busqueda iterativa de pares para el identificador [ih] (20 bytes). Si [anunciar] es true, termina con
      * announce_peer (implied_port=1) a los nodos mas cercanos que dieron token.
      */
-    fun localizar(ih: ByteArray, semillas: List<InetSocketAddress>, anunciar: Boolean): Localizacion {
+    fun localizar(
+        ih: ByteArray, semillas: List<InetSocketAddress>, anunciar: Boolean,
+        parar: () -> Boolean = { false }
+    ): Localizacion {
         val desconocido = ByteArray(20) { 0xFF.toByte() }
         val conocidos = LinkedHashMap<String, Nodo>()
         val consultados = HashSet<String>()
@@ -159,6 +162,7 @@ class Dht(val puerto: Puerto = Demux(DatagramSocket())) {
                 .take(6)
             if (ronda.isEmpty()) return@repeat
             for (n in ronda) {
+                if (parar()) return@repeat
                 val clave = n.dir.toString()
                 consultados.add(clave)
                 val r = consulta(n.dir, "get_peers", mapOf("info_hash" to ih)) ?: continue
@@ -176,6 +180,7 @@ class Dht(val puerto: Puerto = Demux(DatagramSocket())) {
                 .sortedBy { distancia(it.id, ih) }
                 .take(8)
             for (n in destinos) {
+                if (parar()) break
                 val r = consulta(
                     n.dir, "announce_peer",
                     mapOf(
