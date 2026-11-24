@@ -189,6 +189,52 @@ fun mainPar(): Int {
         dC.puerto.cerrar()
     }
 
+
+    // 11. Prueba de conexion con un contacto ya emparejado
+    run {
+        val dir = java.nio.file.Files.createTempDirectory("pc").toFile()
+        val ia = crearIdentidad(dir, "qa"); val ib = crearIdentidad(dir, "qb"); val ic = crearIdentidad(dir, "qc")
+        val sec = ByteArray(32) { (it * 3).toByte() }
+        val deA = Contacto("Beto", ib.huella, sec, 1L); val deB = Contacto("Ana", ia.huella, sec, 1L)
+        val prm = com.optimo.chat.PruebaContacto.Parametros(maxEncuentroMs = 30_000, rafagaMs = 2500, pausaMs = 300, plazoTlsMs = 5000, plazoEcoMs = 5000)
+        val nodo = NodoFalso()
+        val dA = Dht(Demux(DatagramSocket())); val dB = Dht(Demux(DatagramSocket()))
+        var ra: com.optimo.chat.PruebaContacto.Resultado? = null; var rb: com.optimo.chat.PruebaContacto.Resultado? = null
+        val h1 = thread { ra = com.optimo.chat.PruebaContacto.ejecutar(dA, deA, Confianza.contexto(ia.claves, deA.huella), ia.huella, prm, listOf(nodo.dir)) }
+        Thread.sleep(300)
+        val h2 = thread { rb = com.optimo.chat.PruebaContacto.ejecutar(dB, deB, Confianza.contexto(ib.claves, deB.huella), ib.huella, prm, listOf(nodo.dir)) }
+        h1.join(60_000); h2.join(60_000)
+        ok10(ra?.exito == true && rb?.exito == true, "probar contacto: los dos completan (${ra?.motivo} / ${rb?.motivo})")
+        ok10((ra?.msEco ?: -1) >= 0 && (rb?.msEco ?: -1) >= 0 && ra?.protocolo?.startsWith("TLS") == true, "probar contacto: eco medido y protocolo TLS (${ra?.protocolo}, eco ${ra?.msEco} ms)")
+        val l = com.optimo.chat.PruebaContacto.linea("12:00:00", "red=wifi", deA.id, ra!!)
+        ok10(l.contains("OK con 127.0.*.*:") && !l.contains("Beto") && l.contains("contacto ${deA.id.take(4)}"), "probar contacto: la linea de informe enmascara la IP y no lleva el nombre ($l)")
+        dA.puerto.cerrar(); dB.puerto.cerrar(); nodo.cerrar()
+
+        // Huella del contacto distinta de la real: falla sin llegar al eco
+        val nodo2 = NodoFalso()
+        val dA2 = Dht(Demux(DatagramSocket())); val dB2 = Dht(Demux(DatagramSocket()))
+        val malA = Contacto("Beto", ic.huella, sec, 1L)   // A cree que B es C
+        var rc: com.optimo.chat.PruebaContacto.Resultado? = null
+        val g1 = thread { rc = com.optimo.chat.PruebaContacto.ejecutar(dA2, malA, Confianza.contexto(ia.claves, malA.huella), ia.huella, prm, listOf(nodo2.dir)) }
+        Thread.sleep(300)
+        val g2 = thread { com.optimo.chat.PruebaContacto.ejecutar(dB2, deB, Confianza.contexto(ib.claves, deB.huella), ib.huella, prm, listOf(nodo2.dir)) }
+        g1.join(60_000); g2.join(60_000)
+        ok10(rc?.exito == false && rc?.msEco == -1L, "probar contacto: con otra huella falla sin eco (${rc?.motivo})")
+        dA2.puerto.cerrar(); dB2.puerto.cerrar(); nodo2.cerrar()
+
+        // Nadie al otro lado + cancelar
+        val nodo3 = NodoFalso(); val dC = Dht(Demux(DatagramSocket()))
+        val corto = com.optimo.chat.PruebaContacto.Parametros(maxEncuentroMs = 2500, rafagaMs = 1000, pausaMs = 200)
+        val rs = com.optimo.chat.PruebaContacto.ejecutar(dC, deA, Confianza.contexto(ia.claves, deA.huella), ia.huella, corto, listOf(nodo3.dir))
+        ok10(!rs.exito && rs.motivo!!.contains("No se ha encontrado"), "probar contacto: sin el otro movil termina con un motivo claro")
+        var parar = false
+        val t0 = System.currentTimeMillis()
+        val hc = thread { com.optimo.chat.PruebaContacto.ejecutar(dC, deA, Confianza.contexto(ia.claves, deA.huella), ia.huella, prm, listOf(nodo3.dir), { parar }) }
+        Thread.sleep(800); parar = true; hc.join(20_000)
+        ok10(!hc.isAlive && System.currentTimeMillis() - t0 < 20_000, "probar contacto: cancelar corta la busqueda")
+        dC.puerto.cerrar(); nodo3.cerrar()
+    }
+
     println(if (f10 == 0) "Emparejamiento: todo OK" else "Emparejamiento: $f10 FALLOS")
     return f10
 }
