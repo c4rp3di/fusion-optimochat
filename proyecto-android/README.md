@@ -112,6 +112,10 @@ Si no, los nodos de ayuda pasan a ser requisito de la versión 1.
   la DHT la misma IP pública y casi ningún router devuelve esos paquetes hacia dentro (sin «hairpin»), así que sin esto el punching falla
   justo cuando están juntos. La baliza lleva solo un identificador derivado del secreto (cambia cada 2 h) y el puerto del socket
   principal; la IP del otro se toma del origen del paquete. `SondaNat.encuentro` lo usa siempre y funciona incluso sin DHT.
+- `Puerto.recibirSonda` / `transporteEntrante` — las sondas de punching (primer byte 'O') van a su propia cola, y se detecta si el
+  transporte del otro ya nos alcanza. `SondaNat.encuentro` las atiende en un hilo aparte durante TODO el encuentro: antes la búsqueda
+  en la DHT se comía las sondas y respuestas del otro móvil, que daba el encuentro por hecho y se quedaba sin contestación
+  («El transporte UDP no conectó»). La búsqueda en la DHT es interrumpible y el plazo máximo se respeta.
 - `MainActivity.kt` — pantalla de pruebas (ahora se abre desde «Pruebas de red»).
 
 `pruebas/jvm/` — pruebas de la lógica pura; se ejecutan con `pruebas/jvm/probar.sh` (usa el compilador de Kotlin de Gradle, sin Android ni red).
