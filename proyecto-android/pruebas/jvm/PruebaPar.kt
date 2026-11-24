@@ -207,7 +207,7 @@ fun mainPar(): Int {
         ok10(ra?.exito == true && rb?.exito == true, "probar contacto: los dos completan (${ra?.motivo} / ${rb?.motivo})")
         ok10((ra?.msEco ?: -1) >= 0 && (rb?.msEco ?: -1) >= 0 && ra?.protocolo?.startsWith("TLS") == true, "probar contacto: eco medido y protocolo TLS (${ra?.protocolo}, eco ${ra?.msEco} ms)")
         val l = com.optimo.chat.PruebaContacto.linea("12:00:00", "red=wifi", deA.id, ra!!)
-        ok10(l.contains("OK con 127.0.*.*:") && !l.contains("Beto") && l.contains("contacto ${deA.id.take(4)}"), "probar contacto: la linea de informe enmascara la IP y no lleva el nombre ($l)")
+        ok10(Regex("OK con \\d+\\.\\d+\\.\\*\\.\\*:\\d+").containsMatchIn(l) && !l.contains("Beto") && l.contains("contacto ${deA.id.take(4)}"), "probar contacto: la linea de informe enmascara la IP y no lleva el nombre ($l)")
         dA.puerto.cerrar(); dB.puerto.cerrar(); nodo.cerrar()
 
         // Huella del contacto distinta de la real: falla sin llegar al eco
