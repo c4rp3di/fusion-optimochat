@@ -33,4 +33,7 @@ object Servicios {
     fun guardarNombre(ctx: Context, nombre: String) {
         ctx.getSharedPreferences("perfil", Context.MODE_PRIVATE).edit().putString("nombre", nombre.trim().take(Emparejamiento.MAX_NOMBRE)).apply()
     }
+
+    /** Lineas de las pruebas de conexion de esta sesion de la app (sin nombres ni IPs completas). */
+    val historialPruebas: MutableList<String> = java.util.Collections.synchronizedList(ArrayList())
 }
