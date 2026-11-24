@@ -108,6 +108,10 @@ Si no, los nodos de ayuda pasan a ser requisito de la versión 1.
 - `PruebaContacto.kt` — prueba de conexión con un contacto ya emparejado, sin escribir nada: encuentro con su secreto, punching, UDP
   fiable, TLS con su huella fijada y un eco que mide la latencia. Produce una línea de informe con IP enmascarada, tipo de red e id
   corto (sin nombre). Probada en la JVM con DHT falsa; `ProbarContactoActivity` (Android, sin compilar) la lanza desde el contacto.
+- `DescubrimientoLocal.kt` — encuentro en la misma red local por balizas UDP (puerto 47475): dos móviles tras el mismo router ven en
+  la DHT la misma IP pública y casi ningún router devuelve esos paquetes hacia dentro (sin «hairpin»), así que sin esto el punching falla
+  justo cuando están juntos. La baliza lleva solo un identificador derivado del secreto (cambia cada 2 h) y el puerto del socket
+  principal; la IP del otro se toma del origen del paquete. `SondaNat.encuentro` lo usa siempre y funciona incluso sin DHT.
 - `MainActivity.kt` — pantalla de pruebas (ahora se abre desde «Pruebas de red»).
 
 `pruebas/jvm/` — pruebas de la lógica pura; se ejecutan con `pruebas/jvm/probar.sh` (usa el compilador de Kotlin de Gradle, sin Android ni red).
@@ -116,6 +120,8 @@ Si no, los nodos de ayuda pasan a ser requisito de la versión 1.
 
 - El identificador de encuentro cambia cada 2 h y el encuentro usa solo la ventana actual: dos móviles que busquen justo a ambos lados
   del cambio no se verán hasta el siguiente intento (pendiente de resolver probando también la ventana adyacente).
+- Un fallo al enviar un datagrama UDP ya no aborta el encuentro (`Demux` lo cuenta); los mensajes de fallo incluyen un diagnóstico
+  («UDP: N envíos correctos, M fallidos (último fallo: …); red local: X balizas recibidas…») para saber qué parte de la red falla.
 - Solo IPv4 en la DHT (los candidatos IPv6 llegan en la fase 2).
 - Las consultas a la DHT son secuenciales y con espera de 1,2 s: la búsqueda puede tardar decenas de segundos.
 - La prueba TLS usa `SSLSocket` sobre TCP; el paso a `SSLEngine` sobre UDP fiable es de la fase 2.
