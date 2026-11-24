@@ -47,10 +47,10 @@ object PruebaContacto {
     ): Resultado {
         val t0 = System.currentTimeMillis()
         alEstado("Buscando a ${contacto.nombre} (el otro móvil debe pulsar también «Probar conexión»)")
-        val enc = SondaNat.encuentro(dht, contacto.secreto, p.maxEncuentroMs, {}, semillas, p.rafagaMs, p.pausaMs, cancelar)
+        val enc = SondaNat.encuentro(dht, contacto.secreto, p.maxEncuentroMs, {}, semillas, p.rafagaMs, p.pausaMs, cancelar = cancelar)
         val msEnc = System.currentTimeMillis() - t0
         if (cancelar()) return fallo("Cancelado", null, msEnc)
-        if (!enc.exito || enc.remoto == null) return fallo("No se ha encontrado al contacto (DHT o punching)", null, msEnc)
+        if (!enc.exito || enc.remoto == null) return fallo("No se ha encontrado al contacto (DHT o punching). ${enc.texto}", null, msEnc)
         val remoto = enc.remoto
 
         alEstado("Encontrado; abriendo el transporte")
