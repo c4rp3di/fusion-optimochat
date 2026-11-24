@@ -14,7 +14,7 @@ var f6 = 0
 fun ok6(c: Boolean, m: String) { println((if (c) "OK    " else "FALLO ") + m); if (!c) f6++ }
 
 /** Nodo DHT de mentira en loopback: find_node, get_peers (con token) y announce_peer (implied_port). */
-class NodoFalso(private val mentirPuerto: Int = 0) {
+class NodoFalso(private val mentirPuerto: Int = 0, private val retrasoMs: Long = 0) {
     val socket = DatagramSocket(0, InetAddress.getByName("127.0.0.1"))
     val dir = InetSocketAddress("127.0.0.1", socket.localPort)
     private val pares = HashMap<String, LinkedHashSet<InetSocketAddress>>()
@@ -61,6 +61,7 @@ class NodoFalso(private val mentirPuerto: Int = 0) {
                 }
                 else -> continue
             }
+            if (retrasoMs > 0) Thread.sleep(retrasoMs)
             val resp = mapOf<String, Any?>("t" to t, "y" to "r", "ip" to sext(origen, mentirPuerto), "r" to r)
             val bytes = Bencode.codificar(resp)
             try { socket.send(DatagramPacket(bytes, bytes.size, origen)) } catch (_: Exception) { return }
@@ -114,7 +115,8 @@ fun mainDemux(): Int {
             val r = b.recibir(300) ?: break
             when (r.datos[0].toInt()) { 'd'.code -> bencodes++; 'O'.code -> sondas++; else -> otros++ }
         }
-        ok6(bencodes == 20 && sondas == 20, "mezcla: recibir() entrega las 20 DHT y las 20 sondas ($bencodes/$sondas)")
+        while (true) { b.recibirSonda(300) ?: break; sondas++ }
+        ok6(bencodes == 20 && sondas == 20, "mezcla: recibir() entrega las 20 DHT y recibirSonda() las 20 sondas ($bencodes/$sondas)")
         ok6(otros == 0, "mezcla: ningun paquete del transporte aparece en recibir() ($otros)")
         intruso.close(); ua.cerrar(); ub.cerrar(); a.cerrar(); b.cerrar()
     }
@@ -176,7 +178,7 @@ fun mainDemux(): Int {
         val t2 = thread { r2 = SondaNat.encuentro(d2, sec, 30_000, {}, listOf(n.dir), rafagaMs = 3000, pausaMs = 500) }
         t1.join(40_000); t2.join(40_000)
         ok6(r1?.exito == true && r2?.exito == true, "flujo: ambos logran el punching (${r1?.ms} / ${r2?.ms} ms)")
-        ok6(r1?.remoto == loop(d2.puertoLocal) && r2?.remoto == loop(d1.puertoLocal), "flujo: cada uno ve el puerto del otro")
+        ok6((r1?.remoto as? InetSocketAddress)?.port == d2.puertoLocal && (r2?.remoto as? InetSocketAddress)?.port == d1.puertoLocal, "flujo: cada uno ve el puerto del otro")
         if (r1?.exito == true && r2?.exito == true) {
             val u1 = nuevo(d1.puerto.canal(r1!!.remoto!!)); val u2 = nuevo(d2.puerto.canal(r2!!.remoto!!))
             ok6(u1.conectar(5000) && u2.conectar(5000), "flujo: el transporte conecta sobre el mismo socket")
@@ -273,6 +275,49 @@ fun mainDemux(): Int {
         val r4 = SondaNat.encuentro(d3, sec, 2500, {}, listOf(InetSocketAddress("127.0.0.1", 9)), 500, 200, local = false)
         ok6(!r4.exito && r4.texto.contains("UDP:"), "encuentro: el fallo incluye el diagnostico de envios (${r4.texto})")
         listOf(d1, d2, d3).forEach { it.puerto.cerrar() }
+    }
+
+
+    // 11. Las sondas no se pierden mientras se busca en la DHT; el transporte entrante se ve; se puede olvidar lo viejo
+    run {
+        val a = Demux(DatagramSocket()); val dht = Dht(a)
+        val silencioso = DatagramSocket()                      // nunca contesta: la consulta espera 1,2 s
+        val resp = java.util.concurrent.atomic.AtomicReference<Dht.Respuesta?>(null)
+        val h = thread { resp.set(dht.consulta(loop(silencioso.localPort), "find_node", mapOf("target" to dht.idNodo))) }
+        Thread.sleep(200)
+        val intruso = DatagramSocket()
+        val sonda = "OCH0".toByteArray() + byteArrayOf('0'.code.toByte(), 1, 2, 3, 4)
+        intruso.send(DatagramPacket(sonda, sonda.size, loop(a.puertoLocal)))
+        h.join(5000)
+        val s1 = a.recibirSonda(500)
+        ok6(resp.get() == null && s1 != null && s1.datos.contentEquals(sonda), "sondas: una sonda que llega durante una consulta DHT sigue disponible")
+        val transporte = ByteArray(40).also { it[0] = 0xA1.toByte() }
+        intruso.send(DatagramPacket(transporte, transporte.size, loop(a.puertoLocal)))
+        ok6(esperar(2000) { a.transporteEntrante().isNotEmpty() }, "transporte entrante: se ve el origen que aun no tiene canal")
+        a.olvidarNoRegistrados()
+        ok6(a.transporteEntrante().isEmpty(), "transporte entrante: olvidarNoRegistrados lo limpia")
+        silencioso.close(); intruso.close(); a.cerrar()
+    }
+
+    // 12. Encuentro con una DHT lenta: el que esta dentro de la busqueda no deja al otro sin respuesta
+    run {
+        val nodo = NodoFalso(retrasoMs = 400)
+        val d1 = Dht(Demux(DatagramSocket())); val d2 = Dht(Demux(DatagramSocket()))
+        val sec = "dht-lenta".toByteArray()
+        var r1: SondaNat.Resultado? = null; var r2: SondaNat.Resultado? = null
+        val t0 = System.currentTimeMillis()
+        val t1 = thread { r1 = SondaNat.encuentro(d1, sec, 60_000, {}, listOf(nodo.dir), 4000, 500, local = false) }
+        Thread.sleep(1500)
+        val t2 = thread { r2 = SondaNat.encuentro(d2, sec, 60_000, {}, listOf(nodo.dir), 4000, 500, local = false) }
+        t1.join(90_000); t2.join(90_000)
+        ok6(r1?.exito == true && r2?.exito == true, "DHT lenta: los dos se encuentran (${System.currentTimeMillis() - t0} ms; ${r1?.texto} / ${r2?.texto})")
+        listOf(d1, d2).forEach { it.puerto.cerrar() }; nodo.cerrar()
+        // El plazo se respeta aunque la DHT sea lenta
+        val nodo2 = NodoFalso(retrasoMs = 700); val d3 = Dht(Demux(DatagramSocket()))
+        val t3 = System.currentTimeMillis()
+        val r3 = SondaNat.encuentro(d3, sec, 4000, {}, listOf(nodo2.dir), 1000, 200, local = false)
+        ok6(!r3.exito && System.currentTimeMillis() - t3 < 12_000, "DHT lenta: el plazo maximo se respeta (${System.currentTimeMillis() - t3} ms para 4000)")
+        d3.puerto.cerrar(); nodo2.cerrar()
     }
 
     println(if (f6 == 0) "Demux: todo OK" else "Demux: $f6 FALLOS")
