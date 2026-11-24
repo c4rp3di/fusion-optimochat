@@ -26,6 +26,9 @@ interface Puerto {
     fun canal(remoto: SocketAddress): Datagramas
 
     fun cerrar()
+
+    /** Resumen de los envios (correctos y fallidos) para explicar un fallo de red al usuario. */
+    val diagnostico: String
 }
 
 /**
@@ -83,9 +86,26 @@ class Demux(private val socket: DatagramSocket) : Puerto {
         }
     }
 
+    @Volatile private var enviosOk = 0
+    @Volatile private var enviosFallidos = 0
+    @Volatile private var ultimoFallo: String? = null
+
+    /**
+     * UDP no garantiza nada: un envio que falla (destino no alcanzable, firewall del movil que rechaza un destino, nodo
+     * DHT con direccion absurda) NO debe abortar quien llama. Se cuenta y se sigue; [diagnostico] lo resume.
+     */
     override fun enviar(destino: SocketAddress, datos: ByteArray) {
-        socket.send(DatagramPacket(datos, datos.size, destino))
+        try {
+            socket.send(DatagramPacket(datos, datos.size, destino))
+            enviosOk++
+        } catch (e: java.io.IOException) {
+            enviosFallidos++
+            ultimoFallo = "${e.message ?: e.javaClass.simpleName} -> ${Informe.enmascarar(destino as? java.net.InetSocketAddress)}"
+        }
     }
+
+    override val diagnostico: String
+        get() = "UDP: $enviosOk envios correctos, $enviosFallidos fallidos" + (ultimoFallo?.let { " (ultimo fallo: $it)" } ?: "")
 
     override fun recibir(esperaMs: Int): Recibido? = otros.poll(esperaMs.toLong(), TimeUnit.MILLISECONDS)
 
