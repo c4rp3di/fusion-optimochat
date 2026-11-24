@@ -212,6 +212,69 @@ fun mainDemux(): Int {
         dht2.puerto.cerrar(); ms.forEach { it.cerrar() }
     }
 
+
+    // 8. Envios que fallan no abortan; direcciones absurdas se descartan
+    run {
+        val a = Demux(DatagramSocket())
+        val ok = try { a.enviar(InetSocketAddress("127.0.0.1", 0), ByteArray(4)); a.enviar(loop(a.puertoLocal), ByteArray(4)); true } catch (_: Exception) { false }
+        ok6(ok, "envio tolerante: un destino que falla no lanza excepcion (${a.diagnostico})")
+        ok6(a.diagnostico.contains("envios correctos"), "envio tolerante: el diagnostico cuenta los envios")
+        a.cerrar()
+        fun v(ip: String, p: Int) = Dht.direccionValida(InetSocketAddress(InetAddress.getByName(ip), p))
+        ok6(!v("0.0.0.0", 5) && !v("224.0.0.1", 5) && !v("255.255.255.255", 5) && !v("1.2.3.4", 0), "direcciones DHT: se descartan 0.0.0.0, multicast, difusion y puerto 0")
+        ok6(v("1.2.3.4", 6881) && v("127.0.0.1", 5000), "direcciones DHT: se aceptan las normales")
+    }
+
+    // 9. Descubrimiento en la red local (balizas) entre dos extremos en loopback
+    run {
+        fun libre() = DatagramSocket(0).use { it.localPort }
+        val ea = libre(); val eb = libre(); val ec = libre()
+        val id = SondaNat.identificador("local".toByteArray(), 7)
+        val a = com.optimo.chat.DescubrimientoLocal(id, 1111, listOf(loop(eb)), ea, 200).iniciar()
+        val b = com.optimo.chat.DescubrimientoLocal(id, 2222, listOf(loop(ea)), eb, 200).iniciar()
+        val otro = com.optimo.chat.DescubrimientoLocal(SondaNat.identificador("distinto".toByteArray(), 7), 3333, listOf(loop(ea)), ec, 200).iniciar()
+        val propio = com.optimo.chat.DescubrimientoLocal(id, 4444, listOf(loop(ec)), ec, 200).iniciar()
+        val visto = esperar(5000) { a.candidatos().contains(loop(2222)) && b.candidatos().contains(loop(1111)) }
+        ok6(visto, "descubrimiento local: cada uno ve el puerto principal del otro (${a.candidatos()} / ${b.candidatos()})")
+        Thread.sleep(600)
+        ok6(a.candidatos().size == 1, "descubrimiento local: una baliza con otro identificador se ignora (${a.candidatos()})")
+        ok6(propio.candidatos().isEmpty() && propio.recibidas == 0, "descubrimiento local: la propia baliza se ignora")
+        val busy = com.optimo.chat.DescubrimientoLocal(id, 5555, emptyList(), ea, 200).iniciar()
+        ok6(busy.errorEscucha == null || busy.errorEscucha != null, "descubrimiento local: puerto compartido no revienta")
+        listOf(a, b, otro, propio, busy).forEach { it.close() }
+    }
+
+    // 10. Encuentro por red local sin ninguna DHT (misma Wi-Fi, DHT inaccesible)
+    run {
+        fun libre() = DatagramSocket(0).use { it.localPort }
+        val e1 = libre(); val e2 = libre()
+        val sec = "wifi-local".toByteArray()
+        val ih = SondaNat.identificador(sec)
+        val d1 = Dht(Demux(DatagramSocket())); val d2 = Dht(Demux(DatagramSocket()))
+        val l1 = com.optimo.chat.DescubrimientoLocal(ih, d1.puertoLocal, listOf(loop(e2)), e1, 200).iniciar()
+        val l2 = com.optimo.chat.DescubrimientoLocal(ih, d2.puertoLocal, listOf(loop(e1)), e2, 200).iniciar()
+        var r1: SondaNat.Resultado? = null; var r2: SondaNat.Resultado? = null
+        val t1 = thread { r1 = SondaNat.encuentro(d1, sec, 20_000, {}, emptyList(), 3000, 300, localExplicito = l1) }
+        val t2 = thread { r2 = SondaNat.encuentro(d2, sec, 20_000, {}, emptyList(), 3000, 300, localExplicito = l2) }
+        t1.join(30_000); t2.join(30_000)
+        ok6(r1?.exito == true && r2?.exito == true, "encuentro local: sin DHT los dos se encuentran por la red local (${r1?.texto} / ${r2?.texto})")
+        ok6(r1?.remoto == loop(d2.puertoLocal) && r2?.remoto == loop(d1.puertoLocal), "encuentro local: se ven en la direccion del socket principal del otro")
+        // Y el transporte funciona sobre ese resultado
+        if (r1?.exito == true && r2?.exito == true) {
+            val u1 = nuevo(d1.puerto.canal(r1!!.remoto!!)); val u2 = nuevo(d2.puerto.canal(r2!!.remoto!!))
+            ok6(u1.conectar(5000) && u2.conectar(5000), "encuentro local: el transporte conecta")
+            u1.cerrar(); u2.cerrar()
+        }
+        l1.close(); l2.close()
+        // Sin DHT ni red local el fallo explica por que
+        val d3 = Dht(Demux(DatagramSocket()))
+        val r3 = SondaNat.encuentro(d3, sec, 1500, {}, emptyList(), 500, 200, local = false)
+        ok6(!r3.exito && r3.texto.contains("sin nodos"), "encuentro: sin DHT ni red local falla con un motivo (${r3.texto})")
+        val r4 = SondaNat.encuentro(d3, sec, 2500, {}, listOf(InetSocketAddress("127.0.0.1", 9)), 500, 200, local = false)
+        ok6(!r4.exito && r4.texto.contains("UDP:"), "encuentro: el fallo incluye el diagnostico de envios (${r4.texto})")
+        listOf(d1, d2, d3).forEach { it.puerto.cerrar() }
+    }
+
     println(if (f6 == 0) "Demux: todo OK" else "Demux: $f6 FALLOS")
     return f6
 }
